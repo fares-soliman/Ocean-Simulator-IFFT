@@ -1,0 +1,201 @@
+#version 440 core
+
+#define COMPUTE_WORK_GROUP_DIM 16
+
+const float PI = 3.14159265359f;
+const float g = 9.81f;
+const float u_swell = 0.5f;
+const float u_wind_angle = 45;
+
+layout (local_size_x = COMPUTE_WORK_GROUP_DIM, local_size_y = COMPUTE_WORK_GROUP_DIM, local_size_z = 1) in;
+
+layout(binding = 0, rgba32f) writeonly uniform image2DArray u_initial_spectrum;
+layout(binding = 1, rgba32f) readonly uniform image2D u_gaussian_noise;
+
+uniform int u_resolution;
+uniform vec3 u_lengths;
+uniform vec2 u_wind;
+uniform float u_fetch;
+uniform float u_depth;
+uniform vec3 u_low_cascades;
+uniform vec3 u_high_cascades;
+
+float _omega(float k)
+{
+	return sqrt(g * k);	
+}
+
+vec2 conj(const vec2 a){
+    return vec2(a.x, -a.y);
+}
+
+float fmod(float a, float b)
+{
+    return a - b * floor(a / b);
+}
+
+float dispersionDerivative(float kLength)
+{
+    return g / (2 * sqrt(g * kLength));
+}
+
+float GammaApprox(float x)
+{
+    float firstPart = sqrt(2 * PI / x) * pow(x / exp(1), x);
+    float secondPart = 1 + 1 / (12 * x) + 1 / (288 * x * x) - 139 / (51840 * x * x * x) - 571 / (2488320 * x * x * x * x);
+    return firstPart * secondPart;
+}
+
+float NormalizationFactor(float s)
+{
+    float firstPart = pow(2, 2*s - 1) / PI;
+    float secondPart = pow(GammaApprox(s+1), 2) / GammaApprox(2*s + 1);
+    return firstPart * secondPart;
+}
+
+float DispersionPeak()
+{
+    return 22 * pow(g * g / (length(u_wind) * u_fetch), 0.33);
+}
+
+float TMACorrection(float dispersion)
+{
+    float omegaH = dispersion * sqrt(u_depth / g);
+
+    if(omegaH <= 1)
+        return 0.5 * omegaH * omegaH;
+    if(omegaH < 2)
+        return 1 - 0.5 * (2 - omegaH) * (2 - omegaH);
+    
+    return 1; 
+}
+
+float JONSWAP(float omega){
+
+	float U10 = length(u_wind);
+
+	float alpha =  0.076f * pow((pow(U10, 2.0f) / (u_fetch * g)), 0.22f);
+	float omega_p = 22 * pow((pow(g, 2) / (U10 * u_fetch)), 0.333f);
+	float gamma = 3.3f;
+	float sigma = omega <= omega_p ? 0.07f : 0.09f;
+
+	float r = exp(-(pow(omega - omega_p, 2)) / (2 * pow(sigma, 2) * pow(omega_p, 2)));
+
+	float first_half = (alpha * pow(g, 2)) / pow(omega, 5);
+	float second_half = exp(-1*(5.0f/4.0f) * (pow(omega_p / omega, 4)));
+	float third_half = pow(gamma, r);
+
+	return TMACorrection(omega) * first_half * second_half * third_half;
+}
+
+float getAngle(vec2 k){
+	float windAngle = u_wind_angle / 180 * PI;
+    float angle = atan(k.y, k.x) - windAngle;
+
+    // Normalize the angle to the range [-PI, PI]
+    angle = fmod(angle + PI, 2 * PI);
+    if (angle < 0)
+        angle += 2 * PI;
+    return angle - PI;
+}
+
+float baseSpread(float dispersion, float angle)
+{
+    float omega_p = DispersionPeak();
+    float omegaOverOmegaPeek = dispersion / omega_p;
+    float beta;
+
+    if(omegaOverOmegaPeek < 0.95)
+    {
+        beta = 2.61 * pow(omegaOverOmegaPeek, 1.3);
+    }
+    else if(0.95 <= omegaOverOmegaPeek && omegaOverOmegaPeek <= 1.6)
+    {
+        beta = 2.28 * pow(omegaOverOmegaPeek, -1.3);
+    }
+    else
+    {
+        float epsilon = -0.4 + 0.8393 * exp(-0.567 * log(omegaOverOmegaPeek * omegaOverOmegaPeek));
+        beta = pow(10, epsilon);
+    }
+    
+    float sech = 1 / cosh(beta * angle);
+    
+    float firstPart = beta / (2 * tanh(beta * PI));
+    float secondPart = sech * sech;
+
+    return firstPart * secondPart;
+}
+
+float swellDirection(float dispertion, float angle)
+{
+    float s = 16 * tanh(DispersionPeak() / dispertion) * u_swell * u_swell;
+    return NormalizationFactor(s) * pow(abs(cos(angle/2)), 2 * s);
+}
+
+float directionalSpread(float dispersion, float angle)
+{
+    float base = baseSpread(dispersion, angle);
+    float sweel = swellDirection(dispersion, angle);
+    return base * sweel;
+}
+
+float integratedDirectionalSpread(float dispersion)
+{
+    float step = 0.01;
+    float sum = 0;
+    for(float angle = -PI; angle < PI; angle += step)
+    {
+        sum += directionalSpread(dispersion, angle) * step;
+    }
+
+    return 1/sum;
+}
+
+float finalDirectionalSpread(float omega, float angle){
+	float integration = integratedDirectionalSpread(omega);
+    float base = baseSpread(omega, angle);
+    float swell = swellDirection(omega, angle);
+    return integration * base * swell;
+}
+
+float finalSpectrum(float kLength, float omega, float angle) {
+	return JONSWAP(omega) * finalDirectionalSpread(omega, angle) * dispersionDerivative(kLength) / kLength;
+}
+
+float finalAmpFreq(vec2 k, float length_of_layer){
+	float kLength = length(k);
+	float omega = _omega(kLength);
+	float deltaK = 2 * PI / length_of_layer;
+	float angle = getAngle(k);
+	return sqrt(2 * finalSpectrum(kLength, omega, angle) * deltaK * deltaK);
+}
+
+void main()
+{
+	ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
+    uint layer = gl_GlobalInvocationID.z;
+
+    float n = pixel_coord.x - u_resolution/2;
+	float m = pixel_coord.y - u_resolution/2;
+
+	vec2 k = (2.f * PI * vec2(n, m)) / u_lengths[layer];
+
+	// if (length(k) < 0.0001)
+	// {
+	// 	k.x = 0.0001;
+	// 	k.y = 0.0001;
+	// }
+
+    if (length(k) < u_high_cascades[layer] && length(k) >= u_low_cascades[layer]){
+        vec2 E_p = imageLoad(u_gaussian_noise, pixel_coord).rg;
+        float vp = finalAmpFreq(k, u_lengths[layer]);
+        vec2 h = E_p*vp;
+        imageStore(u_initial_spectrum, ivec3(pixel_coord, layer), vec4(h, 0.0f, 0.0f));
+    }
+
+    else {
+        imageStore(u_initial_spectrum, ivec3(pixel_coord, layer), vec4(0.0f, 0.0f, 0.0f, 0.0f));
+    }
+	
+}

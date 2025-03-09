@@ -1,0 +1,62 @@
+#version 440 core
+#define PI 3.141592653
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout (binding = 0, rgba32f) uniform readonly image2D butterflyTexture;
+layout (binding = 1, rgba32f) uniform readonly image2DArray u_input;
+layout (binding = 2, rgba32f) uniform writeonly image2DArray u_output;
+
+uniform int stage;
+
+struct complex {
+	float real;
+	float im;
+};
+
+complex mul(complex c0, complex c1)
+{
+	complex c;
+	c.real = c0.real * c1.real - c0.im * c1.im;
+	if (isnan(c.real)) c.real = 0.0f;
+	c.im = c0.real * c1.im + c0.im * c1.real;
+	if (isnan(c.im)) c.im = 0.0f;
+	return c;
+}
+
+complex add(complex c0, complex c1){
+	complex c;
+	c.real = c0.real + c1.real;
+	c.im = c0.im + c1.im;
+	return c;
+}
+
+void main(void){
+
+	ivec2 x = ivec2(gl_GlobalInvocationID.xy);
+	uint layer = gl_GlobalInvocationID.z;
+
+	vec4 data = imageLoad(butterflyTexture, ivec2(stage, x.x)).rgba;
+
+	vec4 p_ = imageLoad(u_input, ivec3(data.z, x.y, layer)).rgba;
+	vec4 q_ = imageLoad(u_input, ivec3(data.w, x.y, layer)).rgba;
+	vec2 w_ = vec2(data.x, data.y);
+
+	complex p = complex(p_.x, p_.y);
+	complex p2 = complex(p_.z, p_.w);
+	complex q = complex(q_.x, q_.y);
+	complex q2 = complex(q_.z, q_.w);
+	complex w = complex(w_.x, w_.y);
+
+	complex H1 = add(p, mul(w,q));
+	complex H2 = add(p2, mul(w,q2));
+
+	if (isnan(H1.real) || isnan(H1.im) || isnan(H2.real) || isnan(H2.im)){
+		imageStore(u_output, ivec3(x, layer), vec4(0.0f, 0.0f, 0.0f, 0.0f));
+	}
+
+	else {
+		imageStore(u_output, ivec3(x, layer), vec4(H1.real, H1.im, H2.real, H2.im));
+	}
+
+}

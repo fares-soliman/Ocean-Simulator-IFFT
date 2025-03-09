@@ -1,0 +1,22 @@
+#version 440 core
+
+#define COMPUTE_WORK_GROUP_DIM 16
+
+layout (local_size_x = COMPUTE_WORK_GROUP_DIM, local_size_y = COMPUTE_WORK_GROUP_DIM, local_size_z = 1) in;
+
+layout(binding = 0, rgba32f) uniform image2DArray u_initial_spectrum;
+
+uniform int u_resolution;
+
+void main()
+{
+	ivec3 pixel_coord = ivec3(gl_GlobalInvocationID.xyz);
+
+    vec2 original = imageLoad(u_initial_spectrum, pixel_coord).rg;
+    vec2 negative = imageLoad(u_initial_spectrum, ivec3(
+                                ((u_resolution - pixel_coord.x) % u_resolution), 
+                                ((u_resolution - pixel_coord.y) % u_resolution), pixel_coord.z)).rg;
+    
+    imageStore(u_initial_spectrum, pixel_coord, vec4(original, negative));
+
+}

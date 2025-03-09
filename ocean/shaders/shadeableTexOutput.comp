@@ -1,0 +1,62 @@
+#version 440 core
+
+#define WORK_GROUP_DIM 16
+
+layout (local_size_x = WORK_GROUP_DIM, local_size_y = WORK_GROUP_DIM, local_size_z = 1) in;
+
+layout (binding = 0, rgba32f) readonly uniform image2DArray u_dy_map;
+layout (binding = 1, rgba32f) readonly uniform image2DArray u_dx_map;
+layout (binding = 2, rgba32f) readonly uniform image2DArray u_dz_map;
+layout (binding = 3, rgba32f) readonly uniform image2DArray u_jacobian_xxzz;
+layout (binding = 4, rgba32f) readonly uniform image2DArray u_jacobian_xz;
+layout (binding = 5, rgba32f) writeonly uniform image2DArray u_normal_map;
+layout (binding = 6, rgba32f) writeonly uniform image2DArray u_displacement_map;
+layout (binding = 7, rgba32f) uniform image2DArray u_foam_map;
+
+uniform float u_choppiness;
+uniform float u_delta_time;
+uniform float u_foam_amount;
+uniform float u_foam_decay;
+
+float get_permutation(ivec3 pixel_coord)
+{
+	float perms[] = {1.0, -1.0};
+	int index = int(mod((int(pixel_coord.x + pixel_coord.y)), 2));
+	return perms[index];
+}
+
+vec3 load_disp(in ivec3 pixel_coord)
+{
+	return vec3(imageLoad(u_dx_map, pixel_coord).r, imageLoad(u_dy_map, pixel_coord).r, imageLoad(u_dz_map, pixel_coord).r);
+}
+
+vec3 load_normal(in ivec3 pixel_coord)
+{
+	float perm = get_permutation(pixel_coord);
+	//perm doesnt apply to y coordinate
+	return normalize(vec3(perm * -1 * imageLoad(u_dx_map, pixel_coord).b, 1.0f, perm * -1 * imageLoad(u_dz_map, pixel_coord).b));
+}
+
+void main()
+{
+	ivec3 pixel_coord = ivec3(gl_GlobalInvocationID.xyz);
+
+	//turkeyFFT outputs need a permutation step, every other pixel is multiplied by -1
+	float perm = get_permutation(pixel_coord);
+	
+	imageStore(u_normal_map, pixel_coord, vec4((load_normal(pixel_coord) * 0.5f + 0.5f), 1.f));
+	imageStore(u_displacement_map, pixel_coord, vec4(perm * load_disp(pixel_coord), 1.f));
+
+	float j_xx = 1 + u_choppiness * (imageLoad(u_jacobian_xxzz, pixel_coord).r * perm);
+    float j_zz = 1 + u_choppiness * (imageLoad(u_jacobian_xxzz, pixel_coord).b * perm);
+    float j_xz = u_choppiness * (imageLoad(u_jacobian_xz, pixel_coord).r * perm);
+
+	float jacobian = j_xx * j_zz - j_xz * j_xz;
+    jacobian *= -1;
+    jacobian += u_foam_amount;
+
+	float accumulation = imageLoad(u_foam_map, pixel_coord).r - u_foam_decay * u_delta_time / max(jacobian, 0.5);
+    float foam = max(accumulation, jacobian);
+
+	imageStore(u_foam_map, pixel_coord, vec4(foam, foam, foam, 1.f));
+}

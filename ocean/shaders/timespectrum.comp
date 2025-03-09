@@ -1,0 +1,84 @@
+#version 440 core
+
+#define WORK_GROUP_DIM 16
+
+layout (local_size_x = WORK_GROUP_DIM, local_size_y = WORK_GROUP_DIM, local_size_z = 1) in;
+
+layout (binding = 0, rgba32f) uniform image2DArray u_initial_spectrum; // h_0(k)
+layout (binding = 1, rgba32f) uniform image2DArray u_vertical_displacement; // h_t(k)
+layout (binding = 2, rgba32f) uniform image2DArray u_dx_displacement;
+layout (binding = 3, rgba32f) uniform image2DArray u_dz_displacement;
+layout (binding = 4, rgba32f) uniform image2DArray u_jacobian_xxzz;
+layout (binding = 5, rgba32f) uniform image2DArray u_jacobian_xz;
+
+uniform int u_resolution;
+uniform vec3 u_lengths;
+uniform float u_choppiness;
+uniform float u_time;
+
+const float g = 9.81;  
+const float PI = 3.14159265358979323846264; 
+
+
+// complex operations
+vec2 prod(const vec2 a, const vec2 b)
+{
+    return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x);
+} 
+
+vec2 conj(const vec2 a)
+{
+    return vec2(a.x, -a.y);
+}
+vec2 euler(const float x, const int neg)
+{
+    return vec2(cos(x), sin(x) * neg);
+}
+
+float omega(float k)
+{
+    return sqrt(g * k);
+}
+
+void main(void)
+{
+    ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
+    uint layer = gl_GlobalInvocationID.z;
+    float n = pixel_coord.x - u_resolution/2;
+	float m = pixel_coord.y - u_resolution/2;
+
+    vec2 wave_vector = (2.f * PI * vec2(n, m)) / u_lengths[layer];
+
+    float k_length = length(wave_vector);
+    k_length = max(k_length, 0.000001);
+
+    float phase = omega(k_length) * u_time;
+
+    vec2 h0 = imageLoad(u_initial_spectrum, ivec3(pixel_coord, layer)).rg;
+    vec2 h0_negative_k = imageLoad(u_initial_spectrum, ivec3(pixel_coord, layer)).ba;
+
+    //height in frequency domain
+    vec2 h = prod(h0, euler(phase, 1)) + prod(conj(h0_negative_k), euler(phase, -1));
+
+    vec2 ih = vec2(-h.y, h.x);
+    float oneOverKLength = 1 / k_length;
+
+    //displacements
+    vec2 Dx = oneOverKLength * wave_vector.x * ih * u_choppiness;
+    vec2 Dz = oneOverKLength * wave_vector.y * ih * u_choppiness;
+
+    //normals
+    vec2 nx = ih * wave_vector.x;
+    vec2 nz = ih * wave_vector.y;
+
+    //jacobians
+    vec2 j_xx = oneOverKLength * wave_vector.x * wave_vector.x * -h;
+    vec2 j_zz = oneOverKLength * wave_vector.y * wave_vector.y * -h;
+    vec2 j_xz = oneOverKLength * wave_vector.x * wave_vector.y * -h;
+    
+    imageStore(u_vertical_displacement, ivec3(pixel_coord, layer), vec4(h, 0.f, 0.f));
+    imageStore(u_dx_displacement, ivec3(pixel_coord, layer), vec4(Dx,nx));
+    imageStore(u_dz_displacement, ivec3(pixel_coord, layer), vec4(Dz,nz));
+    imageStore(u_jacobian_xxzz, ivec3(pixel_coord, layer), vec4(j_xx,j_zz));
+    imageStore(u_jacobian_xz, ivec3(pixel_coord, layer), vec4(j_xz,0,0));
+}
