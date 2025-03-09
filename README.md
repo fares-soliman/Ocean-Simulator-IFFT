@@ -2,7 +2,7 @@
 
 Ocean Simulator built in OpenGL
 
-https://github.com/user-attachments/assets/3bc85168-48db-41b8-98b1-2a82ea289ec1
+https://github.com/user-attachments/assets/47916642-305c-4356-b5a0-3efca02176fb
 
 - Generates a frequency spectrum using the JONSWAP spectra equation and compute shaders
 - Converts frequency into time domain by levereging the Cooley–Tukey algorithm for the Inverse Fast Fourier Transform (IFFT)
