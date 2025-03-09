@@ -4,16 +4,17 @@ Ocean Simulator built in OpenGL
 
 https://github.com/user-attachments/assets/47916642-305c-4356-b5a0-3efca02176fb
 
-- Generates a frequency spectrum using the JONSWAP spectra equation and compute shaders
+- Generates frequency spectrum using the JONSWAP spectrum equation via compute shaders
 - Converts frequency into time domain by levereging the Cooley–Tukey algorithm for the Inverse Fast Fourier Transform (IFFT)
 - Includes sub surface scattering, specular and environment reflections, and foam accumulation
 - Wind direction and speed, ocean depth and fetch, and numerous other parameters can be tuned for any desired effect
 
 ## Example 1 - Light Winds
 
-https://github.com/user-attachments/assets/7b690368-d37d-4348-abfe-22f909bc5a35
+https://github.com/user-attachments/assets/d581c09c-beba-4647-81d5-8f90385a751d
 
 ## Example 2 - Strong Winds
 
-https://github.com/user-attachments/assets/c59e6f0e-cac3-4722-82b7-eeb111fdf7c0
+https://github.com/user-attachments/assets/d9d845ce-041d-40a9-b120-499ecf6802d6
+
 
