@@ -21,12 +21,12 @@ void Scene::Init()
 
 	ocean = new Ocean();
 	skybox = new Skybox({ ".\\res\\Epic_BlueSunset_Cam_2_Left+X.png",
-									".\\res\\Epic_BlueSunset_Cam_3_Right-X.png",
-									".\\res\\Epic_BlueSunset_Cam_4_Up+Y.png",
-									".\\res\\Epic_BlueSunset_Cam_5_Down-Y.png",
-									".\\res\\Epic_BlueSunset_Cam_0_Front+Z.png",
-									".\\res\\Epic_BlueSunset_Cam_1_Back-Z.png"
-		});
+				".\\res\\Epic_BlueSunset_Cam_3_Right-X.png",
+				".\\res\\Epic_BlueSunset_Cam_4_Up+Y.png",
+				".\\res\\Epic_BlueSunset_Cam_5_Down-Y.png",
+				".\\res\\Epic_BlueSunset_Cam_0_Front+Z.png",
+				".\\res\\Epic_BlueSunset_Cam_1_Back-Z.png"
+			   });
 
 	initInitialSpectrum();
 	genInitialSpectrum();
